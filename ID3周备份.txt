@@ -1,0 +1,174 @@
+function type=Classifier( PValue )
+    global node child_value child_node_num
+    [node,child_value,child_node_num]=ID3();
+    n=1;        %从树的根结点（即node{1}）开始查找
+    k=1;
+    while ~isempty(child_node_num{n})
+        for i=1:length(child_value{n})
+            if PValue(node{n})==child_value{n}(i)
+                n=child_node_num{n}(i);break;
+            end            
+        end
+        if i==length(child_value{n})
+            % 若这个值在分类器中不存在，则取其最近的值进行分类
+           PValue(node{n})=PValue(node{n})+0.1*k;
+        end
+        k=(-1)^k*( abs(k)+1 );
+    end
+    type=node{n};
+end
+% 函数返回一棵决策树
+function  [node,child_value,child_node_num]=ID3()
+    clear;
+    clear global node child_value child_node_num;
+    global node child_value child_node_num
+    [SL, SW, PL, PW, CN]=textread('iris.txt','%f %f %f %f %s');
+    DValue=[SL SW PL PW];    %SL=DValue(:,1)
+    for i=1:length(SL)
+        A(i)=i;
+    end
+    ClassPNum=[1 2 3 4];
+    m=0;
+    [node,child_value,child_node_num]=TreeNode( DValue, CN, A, ClassPNum,m ); 
+end
+% 生成树结点
+% DValue--前四列数据
+% A--参与划分的行号
+% CN--属性值的集合（第5列数据）
+% ClassPNum为划分的剩余属性编号
+% 当前node的父亲结点为node{m}
+function [node,child_value,child_node_num]=TreeNode( DValue, CN, A, ClassPNum,m)
+    global node child_value child_node_num
+    %ClassName={'SL', 'SW', 'PL', 'PW'};
+    n=length(node);
+    if m>0
+        %如果父亲结点存在，将本结点的序号存入父亲结点的子结点序号集中
+        k=length(child_node_num{m});
+        child_node_num{m}(k+1)=n+1;
+    end
+    % 1、样本为空，则树为空
+    if isempty(DValue)
+        node{ n+1 }=[];
+        child_value{ n+1 }=[];
+        child_node_num{ n+1 }=[];
+        return;
+    end 
+    % 2、用于划分的剩余属性为空，选择多数元组所在的类作为结点
+    if isempty( ClassPNum ) 
+       node{ n+1 }=find_most( CN,A );
+       child_value{ n+1 }=[];
+       child_node_num{ n+1 }=[];
+       return;
+    end 
+    % 3、样本中所有数据都属于同一类，将此类作为结点
+    CNRowNum=CN_sta( CN, A);
+    if length( find(CNRowNum==0) )>=2
+        node{ n+1 }=CN{A(1)};
+        child_value{ n+1 }=[];
+        child_node_num{ n+1 }=[];
+        return;
+    % 4、样本中所有数据不属于同一类
+    else
+        I=Exp( CN,A );
+        for i=1:length( ClassPNum )            
+            Entropy(i)=avg_entropy( DValue(:,ClassPNum(i)), A, CN);
+            Gain(i)=I-Entropy(i);
+        end
+        % 4.1、各属性的信息增益均小于0，选择多数元组所在的类作为结点
+        if max(Gain)<=0
+            node{ n+1 }=find_most( CN,A );
+            child_value{ n+1 }=[];
+            child_node_num{ n+1 }=[];
+        return;
+        % 4.2、在信息增益最大的属性上进行划分
+        else
+            maxG=find( Gain==max(Gain) );
+            [PValue RowNum]=type_sta( DValue(:,ClassPNum(maxG(1))), A );
+            node{ n+1 }=ClassPNum(maxG(1));
+            child_value{ n+1 }=PValue;
+            child_node_num{ n+1 }=[];
+            ClassPNum(maxG)=[];     % 删除ClassPNum(maxG)--已经进行划分的属性
+            for i=1:length(PValue)
+                [node,child_value,child_node_num]=TreeNode( DValue, CN, RowNum{i}, ClassPNum,n+1 );
+            end
+            return;
+        end
+    end
+end
+
+% A--参与划分的行号
+% DValue--数据集的前四列
+% 本函数用于统计参与划分的行大多数属于哪一个类
+function most_type=find_most( CN,A )
+    TypeName={'Iris-setosa','Iris-versicolor','Iris-virginica'};
+    CNRowNum=CN_sta( CN, A);
+    n=max(CNRowNum);
+    maxn=find( CNRowNum==n );
+    most_type=TypeName{maxn};
+end
+
+% 计算属性P的熵
+% A--参与计算的行号，即计算的行范围
+% Attri--求属性Attri的熵
+% CN--类别属性值
+function entropy=avg_entropy( Attri, A, CN )
+    k=0;entropy=0;
+    n=length(A);
+    I=Exp( CN,A );
+    [PValue,RowNum]=type_sta( Attri, A );
+    for i=1:length( PValue )
+        CI=Exp( CN, RowNum{i});
+        entropy=entropy-length( RowNum{i} )/n*CI;
+    end
+end
+
+% 计算样本分类的期望
+% A--参与计算的行号
+% Attri--求期望的属性值的集合
+function I=Exp(CN,A)
+    CNRowNum=CN_sta( CN, A );
+    n=length(A);
+    I=0;
+    for i=1:3
+        if CNRowNum(i)>0
+            P(i)=CNRowNum(i)/n;
+            I=I-P(i)*log2( P(i) );
+        end
+    end
+end
+
+% 统计属性的取值及各取值对应的行号集合
+% A为参与统计的记录的行号集合
+% Attri为属性值的集合
+function [PValue,RowNum]=type_sta( Attri, A)
+    k=1;
+    PValue=Attri( A(1) );
+    RowNum{1}=A(1);
+    for i=2:length(A)
+        n1=find( PValue==Attri( A(i) ) );
+        if isempty(n1)
+            k=k+1;
+            PValue(k)=Attri( A(i) );
+            RowNum{k}=A(i);
+        else
+            n2=length( RowNum{n1} );
+            RowNum{n1}(n2+1)=A(i);
+        end
+    end            
+end
+
+% 统计类别属性的取值及各取值对应的行号集合
+% A为参与统计的记录的行号集合
+% CN为类别属性值的集合
+function CNRowNum=CN_sta( CN, A)
+    CNRowNum=[0 0 0];
+    TypeName={'Iris-setosa','Iris-versicolor'};
+    for i=1:length( A )
+        if strcmp( CN{A(i)},TypeName{1} )
+            CNRowNum(1)=CNRowNum(1)+1;
+        elseif strcmp( CN{A(i)},TypeName{2} )
+            CNRowNum(2)=CNRowNum(2)+1;
+        else CNRowNum(3)=CNRowNum(3)+1;
+        end
+    end            
+end
